@@ -336,14 +336,47 @@ elif page == "📊 Analyse a Business":
 
                 with st.spinner("Saving data and running AI analysis..."):
                     from modules.data_loader import load_from_csv
-                    import tempfile, os
+                    from modules.narrative_generator import generate_cfo_narrative, get_ratios_for_business, calculate_health_score
+                    from modules.benchmarker import compare_to_benchmark
+                    from modules.trend_analyser import analyse_trends
+                    from modules.db_connection import get_engine
+                    import tempfile, os, pandas as pd
+
+                    # Save CSV to temp file and load into database
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
                                                      delete=False, newline='') as tmp:
                         result['dataframe'].to_csv(tmp.name, index=False)
                         tmp_path = tmp.name
                     load_from_csv(tmp_path)
                     os.unlink(tmp_path)
-                    st.success("✓ Data loaded and analysis complete!")
+
+                    # Find the business_id just inserted
+                    engine = get_engine()
+                    biz_df = pd.read_sql(
+                        f"SELECT id FROM businesses WHERE name = '{biz_name}' ORDER BY id DESC LIMIT 1",
+                        engine
+                    )
+                    if not biz_df.empty:
+                        bid = int(biz_df.iloc[0]['id'])
+                        st.session_state['demo_business_id'] = bid
+
+                        ratios    = get_ratios_for_business(bid, year=year)
+                        score     = calculate_health_score(ratios)
+                        analysis  = generate_cfo_narrative(bid, year=year)
+                        benchmark = compare_to_benchmark(bid, year=year)
+                        trends    = analyse_trends(bid)
+
+                        st.session_state['results'] = {
+                            'ratios':    ratios,
+                            'score':     score,
+                            'analysis':  analysis,
+                            'benchmark': benchmark,
+                            'trends':    trends
+                        }
+                        st.success("✓ Analysis complete! Scroll down to see results.")
+                        st.rerun()
+                    else:
+                        st.error("Could not find the uploaded business in the database.")
         else:
             st.error("Please upload a file or select demo data first.")
 
