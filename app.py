@@ -228,11 +228,28 @@ elif page == "📊 Analyse a Business":
 
     st.divider()
 
-    # ── Business info form (for CSV uploads) ─────────
+        # ── Business info form (for CSV uploads) ─────────
     if upload_method in ["📂 Upload your own CSV", "📥 Use Xero export"]:
-        st.markdown('<div class="section-header">Step 2 — Business details</div>', unsafe_allow_html=True)
         from modules.xero_mapper import INDUSTRIES
 
+    # Check if CSV already has business info columns
+    if df_raw is not None and all(col in df_raw.columns for col in ['name', 'industry', 'business_age', 'num_employees', 'year']):
+        # Auto-read from CSV — no form needed
+        year       = int(df_raw['year'].max())
+        latest_row = df_raw[df_raw['year'] == year].iloc[0]
+        biz_name   = latest_row['name']
+        industry   = latest_row['industry']
+        biz_age    = int(latest_row['business_age'])
+        employees  = int(latest_row['num_employees'])
+        st.markdown('<div class="section-header">Step 2 — Business details (auto-detected from your file)</div>', unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        with col1: st.info(f"**Business:** {biz_name}")
+        with col2: st.info(f"**Industry:** {industry}")
+        with col3: st.info(f"**Age:** {biz_age} years")
+        with col4: st.info(f"**Employees:** {employees}")
+    else:
+        # Manual entry — CSV missing business info columns
+        st.markdown('<div class="section-header">Step 2 — Business details</div>', unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             biz_name = st.text_input("Business name", placeholder="e.g. Kiwi Café Ltd")
@@ -242,7 +259,6 @@ elif page == "📊 Analyse a Business":
             biz_age = st.number_input("Years in operation", min_value=0, max_value=100, value=3)
         with col4:
             employees = st.number_input("Number of employees", min_value=1, max_value=10000, value=10)
-
         year = None
 
     st.divider()
