@@ -5,6 +5,7 @@
 # ══════════════════════════════════════════════════════
 
 import streamlit as st
+from modules.xero_mapper import INDUSTRIES
 
 # ── Page config — must be first Streamlit command ────
 st.set_page_config(
@@ -46,7 +47,7 @@ st.markdown("""
     .health-score-healthy  { color: #1D9E75; font-size: 2.5rem; font-weight: 700; }
     .health-score-moderate { color: #BA7517; font-size: 2.5rem; font-weight: 700; }
     .health-score-risk     { color: #A32D2D; font-size: 2.5rem; font-weight: 700; }
-        .flag-danger  { background: #FCEBEB; border-left: 4px solid #A32D2D; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; color: #791F1F; }
+    .flag-danger  { background: #FCEBEB; border-left: 4px solid #A32D2D; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; color: #791F1F; }
     .flag-warning { background: #FAEEDA; border-left: 4px solid #BA7517; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; color: #633806; }
     .flag-success { background: #EAF3DE; border-left: 4px solid #1D9E75; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 0.5rem; color: #27500A; }
     .stButton > button {
@@ -228,38 +229,44 @@ elif page == "📊 Analyse a Business":
 
     st.divider()
 
-        # ── Business info form (for CSV uploads) ─────────
+    # ── Business info — auto-detect or manual ─────────
     if upload_method in ["📂 Upload your own CSV", "📥 Use Xero export"]:
-        from modules.xero_mapper import INDUSTRIES
 
-    # Check if CSV already has business info columns
-    if df_raw is not None and all(col in df_raw.columns for col in ['name', 'industry', 'business_age', 'num_employees', 'year']):
-        # Auto-read from CSV — no form needed
-        year       = int(df_raw['year'].max())
-        latest_row = df_raw[df_raw['year'] == year].iloc[0]
-        biz_name   = latest_row['name']
-        industry   = latest_row['industry']
-        biz_age    = int(latest_row['business_age'])
-        employees  = int(latest_row['num_employees'])
-        st.markdown('<div class="section-header">Step 2 — Business details (auto-detected from your file)</div>', unsafe_allow_html=True)
-        col1, col2, col3, col4 = st.columns(4)
-        with col1: st.info(f"**Business:** {biz_name}")
-        with col2: st.info(f"**Industry:** {industry}")
-        with col3: st.info(f"**Age:** {biz_age} years")
-        with col4: st.info(f"**Employees:** {employees}")
-    else:
-        # Manual entry — CSV missing business info columns
-        st.markdown('<div class="section-header">Step 2 — Business details</div>', unsafe_allow_html=True)
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            biz_name = st.text_input("Business name", placeholder="e.g. Kiwi Café Ltd")
-        with col2:
-            industry = st.selectbox("Industry", INDUSTRIES)
-        with col3:
-            biz_age = st.number_input("Years in operation", min_value=0, max_value=100, value=3)
-        with col4:
-            employees = st.number_input("Number of employees", min_value=1, max_value=10000, value=10)
-        year = None
+        # Check if CSV already has all required business info columns
+        required_cols = ['name', 'industry', 'business_age', 'num_employees', 'year']
+        if df_raw is not None and all(col in df_raw.columns for col in required_cols):
+            # Auto-read from CSV — no form needed
+            year       = int(df_raw['year'].max())
+            latest_row = df_raw[df_raw['year'] == year].iloc[0]
+            biz_name   = latest_row['name']
+            industry   = latest_row['industry']
+            biz_age    = int(latest_row['business_age'])
+            employees  = int(latest_row['num_employees'])
+
+            st.markdown('<div class="section-header">Step 2 — Business details (auto-detected from your file)</div>', unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.info(f"**Business:** {biz_name}")
+            with col2:
+                st.info(f"**Industry:** {industry}")
+            with col3:
+                st.info(f"**Age:** {biz_age} years")
+            with col4:
+                st.info(f"**Employees:** {employees}")
+
+        else:
+            # Manual entry — CSV missing business info columns
+            st.markdown('<div class="section-header">Step 2 — Business details</div>', unsafe_allow_html=True)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                biz_name = st.text_input("Business name", placeholder="e.g. Kiwi Cafe Ltd")
+            with col2:
+                industry = st.selectbox("Industry", INDUSTRIES)
+            with col3:
+                biz_age = st.number_input("Years in operation", min_value=0, max_value=100, value=3)
+            with col4:
+                employees = st.number_input("Number of employees", min_value=1, max_value=10000, value=10)
+            year = None
 
     st.divider()
 
@@ -269,55 +276,56 @@ elif page == "📊 Analyse a Business":
     run_btn = st.button("🤖 Analyse with AI →", use_container_width=True)
 
     if run_btn:
-        # Demo mode
+
+        # ── Demo mode ────────────────────────────────
         if upload_method == "🏢 Use demo data":
             if 'demo_business_id' not in st.session_state:
                 st.error("Please select a demo company first.")
             else:
-                with st.spinner("Running AI analysis... this takes 15–20 seconds"):
+                with st.spinner("Running AI analysis... this takes 15-20 seconds"):
                     from modules.narrative_generator import generate_cfo_narrative, get_ratios_for_business, calculate_health_score
                     from modules.benchmarker import compare_to_benchmark
                     from modules.trend_analyser import analyse_trends
 
-                    bid      = st.session_state['demo_business_id']
-                    ratios   = get_ratios_for_business(bid)
-                    score    = calculate_health_score(ratios)
-                    analysis = generate_cfo_narrative(bid)
-                    benchmark= compare_to_benchmark(bid)
-                    trends   = analyse_trends(bid)
+                    bid       = st.session_state['demo_business_id']
+                    ratios    = get_ratios_for_business(bid)
+                    score     = calculate_health_score(ratios)
+                    analysis  = generate_cfo_narrative(bid)
+                    benchmark = compare_to_benchmark(bid)
+                    trends    = analyse_trends(bid)
 
                     st.session_state['results'] = {
-                        'ratios':     ratios,
-                        'score':      score,
-                        'analysis':   analysis,
-                        'benchmark':  benchmark,
-                        'trends':     trends
+                        'ratios':    ratios,
+                        'score':     score,
+                        'analysis':  analysis,
+                        'benchmark': benchmark,
+                        'trends':    trends
                     }
-                    st.success("✓ Analysis complete! Go to results below.")
+                    st.success("Analysis complete! Scroll down to see results.")
                     st.rerun()
 
-        # CSV upload mode
+        # ── CSV upload mode ───────────────────────────
         elif df_raw is not None:
             from modules.xero_mapper import process_upload
             import pandas as pd
 
             # Auto-detect latest year from uploaded data
             if 'year' in df_raw.columns:
-                year = int(df_raw['year'].max())
+                year       = int(df_raw['year'].max())
                 latest_row = df_raw[df_raw['year'] == year].iloc[0]
             else:
-                year = 2024
+                year       = 2024
                 latest_row = df_raw.iloc[0]
 
-            # Auto-detect employees and age from latest year row
+            # Auto-detect business info from latest year row
             if 'num_employees' in df_raw.columns:
                 employees = int(latest_row['num_employees'])
             if 'business_age' in df_raw.columns:
                 biz_age = int(latest_row['business_age'])
-            if 'name' in df_raw.columns and not biz_name:
-                biz_name = latest_row['name']
+            if 'name' in df_raw.columns:
+                biz_name = str(latest_row['name'])
             if 'industry' in df_raw.columns and latest_row['industry'] in INDUSTRIES:
-                industry = latest_row['industry']
+                industry = str(latest_row['industry'])
 
             result = process_upload(
                 df_raw,
@@ -327,7 +335,7 @@ elif page == "📊 Analyse a Business":
                 num_employees=employees,
                 year=year
             )
-            st.info(f"✓ Auto-detected: Latest year = {year} | Employees = {employees} | Industry = {industry}")
+
             if not result['is_valid']:
                 st.error(f"Missing columns: {result['missing']}")
             else:
@@ -342,7 +350,7 @@ elif page == "📊 Analyse a Business":
                     from modules.db_connection import get_engine
                     import tempfile, os, pandas as pd
 
-                    # Save CSV to temp file and load into database
+                    # Save to temp CSV and load into database
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
                                                      delete=False, newline='') as tmp:
                         result['dataframe'].to_csv(tmp.name, index=False)
@@ -356,14 +364,26 @@ elif page == "📊 Analyse a Business":
                         f"SELECT id FROM businesses WHERE name = '{biz_name}' ORDER BY id DESC LIMIT 1",
                         engine
                     )
+
                     if not biz_df.empty:
                         bid = int(biz_df.iloc[0]['id'])
                         st.session_state['demo_business_id'] = bid
 
-                        ratios    = get_ratios_for_business(bid, year=year)
+                        # Get latest year available for this business
+                        year_df = pd.read_sql(
+                            f"SELECT MAX(year) as max_year FROM financials WHERE business_id = {bid}",
+                            engine
+                        )
+                        actual_year = int(year_df.iloc[0]['max_year'])
+                        ratios = get_ratios_for_business(bid, year=actual_year)
+
+                        if ratios is None:
+                            st.error("Could not load financial ratios. Please check your CSV data.")
+                            st.stop()
+
                         score     = calculate_health_score(ratios)
-                        analysis  = generate_cfo_narrative(bid, year=year)
-                        benchmark = compare_to_benchmark(bid, year=year)
+                        analysis  = generate_cfo_narrative(bid, year=actual_year)
+                        benchmark = compare_to_benchmark(bid, year=actual_year)
                         trends    = analyse_trends(bid)
 
                         st.session_state['results'] = {
@@ -373,34 +393,32 @@ elif page == "📊 Analyse a Business":
                             'benchmark': benchmark,
                             'trends':    trends
                         }
-                        st.success("✓ Analysis complete! Scroll down to see results.")
+                        st.success("Analysis complete! Scroll down to see results.")
                         st.rerun()
                     else:
-                        st.error("Could not find the uploaded business in the database.")
+                        st.error("Could not find the uploaded business. Please check your CSV.")
         else:
             st.error("Please upload a file or select demo data first.")
 
+
     # ── Show results if available ─────────────────────
-        # ── Show results if available ─────────────────────
     if 'results' in st.session_state:
-        r        = st.session_state['results']
-        ratios   = r['ratios']
-        score    = r['score']
-        analysis = r['analysis']
-        benchmark= r['benchmark']
-        trends   = r['trends']
+        r         = st.session_state['results']
+        ratios    = r['ratios']
+        score     = r['score']
+        analysis  = r['analysis']
+        benchmark = r['benchmark']
+        trends    = r['trends']
 
         import plotly.graph_objects as go
-        import plotly.express as px
         from modules.report_generator import generate_report, clean_text
         import pandas as pd
 
         st.divider()
-        st.markdown("## 📊 Analysis Results")
+        st.markdown("## Analysis Results")
 
-        # ── Health score + summary metrics ───────────
+        # ── Health score + summary metrics ────────────
         col1, col2, col3, col4 = st.columns(4)
-
         score_col = "#1D9E75" if score >= 75 else ("#BA7517" if score >= 50 else "#A32D2D")
         score_lbl = "Healthy" if score >= 75 else ("Moderate" if score >= 50 else "At Risk")
 
@@ -412,78 +430,53 @@ elif page == "📊 Analyse a Business":
                 <div style="font-size:0.9rem;font-weight:600;color:{score_col};">{score_lbl}</div>
             </div>""", unsafe_allow_html=True)
         with col2:
-            st.metric("Annual Revenue",
-                      f"NZD {float(ratios['revenue']):,.0f}")
+            st.metric("Annual Revenue",   f"NZD {float(ratios['revenue']):,.0f}")
         with col3:
             st.metric("Net Profit",
                       f"NZD {float(ratios['net_profit']):,.0f}",
                       f"{float(ratios['net_margin'])}% margin")
         with col4:
-            st.metric("Total Assets",
-                      f"NZD {float(ratios['total_assets']):,.0f}")
+            st.metric("Total Assets",     f"NZD {float(ratios['total_assets']):,.0f}")
 
         st.divider()
 
-        # ── Ratio table + benchmark chart ────────────
+        # ── Ratio table + benchmark chart ─────────────
         col1, col2 = st.columns(2)
 
         with col1:
             st.markdown('<div class="section-header">Key Financial Ratios</div>', unsafe_allow_html=True)
-
             ratio_rows = [
-                ("Gross Margin",    f"{ratios['gross_margin']}%",  float(ratios['gross_margin']) >= 40),
-                ("Net Margin",      f"{ratios['net_margin']}%",    float(ratios['net_margin']) >= 5),
-                ("Current Ratio",   f"{ratios['current_ratio']}x", float(ratios['current_ratio']) >= 1.5),
-                ("Quick Ratio",     f"{ratios['quick_ratio']}x",   float(ratios['quick_ratio']) >= 1.0),
-                ("Debt to Equity",  f"{ratios['debt_to_equity']}x",float(ratios['debt_to_equity']) <= 1.5),
-                ("ROE",             f"{ratios['roe']}%",           float(ratios['roe']) >= 10),
-                ("ROA",             f"{ratios['roa']}%",           float(ratios['roa']) >= 5),
+                ("Gross Margin",   f"{ratios['gross_margin']}%",   float(ratios['gross_margin'])  >= 40),
+                ("Net Margin",     f"{ratios['net_margin']}%",     float(ratios['net_margin'])    >= 5),
+                ("Current Ratio",  f"{ratios['current_ratio']}x",  float(ratios['current_ratio']) >= 1.5),
+                ("Quick Ratio",    f"{ratios['quick_ratio']}x",    float(ratios['quick_ratio'])   >= 1.0),
+                ("Debt to Equity", f"{ratios['debt_to_equity']}x", float(ratios['debt_to_equity'])<= 1.5),
+                ("ROE",            f"{ratios['roe']}%",            float(ratios['roe'])           >= 10),
+                ("ROA",            f"{ratios['roa']}%",            float(ratios['roa'])           >= 5),
             ]
-
             for label, value, is_good in ratio_rows:
                 c1, c2, c3 = st.columns([3, 2, 1])
-                with c1:
-                    st.markdown(f"**{label}**")
-                with c2:
-                    st.markdown(f"`{value}`")
-                with c3:
-                    st.markdown("🟢" if is_good else "🔴")
+                with c1: st.markdown(f"**{label}**")
+                with c2: st.markdown(f"`{value}`")
+                with c3: st.markdown("🟢" if is_good else "🔴")
 
         with col2:
             st.markdown('<div class="section-header">vs NZ Industry Average</div>', unsafe_allow_html=True)
-
             if benchmark and benchmark.get('comparisons'):
-                comps = benchmark['comparisons']
-                labels  = [c['ratio'] for c in comps]
-                biz_vals= [c['business'] for c in comps]
-                bench_vals=[c['benchmark'] for c in comps]
-
+                comps      = benchmark['comparisons']
                 fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    name='This Business',
-                    x=labels, y=biz_vals,
-                    marker_color='#185FA5'
-                ))
-                fig.add_trace(go.Bar(
-                    name='NZ Industry Average',
-                    x=labels, y=bench_vals,
-                    marker_color='#D1CFC8'
-                ))
-                fig.update_layout(
-                    barmode='group',
-                    height=320,
-                    margin=dict(l=0, r=0, t=10, b=0),
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                )
+                fig.add_trace(go.Bar(name='This Business',      x=[c['ratio'] for c in comps], y=[c['business']  for c in comps], marker_color='#185FA5'))
+                fig.add_trace(go.Bar(name='NZ Industry Average',x=[c['ratio'] for c in comps], y=[c['benchmark'] for c in comps], marker_color='#D1CFC8'))
+                fig.update_layout(barmode='group', height=320,
+                                  margin=dict(l=0,r=0,t=10,b=0),
+                                  legend=dict(orientation='h',yanchor='bottom',y=1.02),
+                                  plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
-        # ── Risk flags ───────────────────────────────
+        # ── Risk flags ────────────────────────────────
         st.markdown('<div class="section-header">Risk Flags</div>', unsafe_allow_html=True)
-
         flags = []
         if float(ratios['current_ratio']) < 1.2:
             flags.append(('danger',  f"Low liquidity — current ratio {ratios['current_ratio']} is below 1.2"))
@@ -513,104 +506,84 @@ elif page == "📊 Analyse a Business":
 
         for flag_type, msg in flags:
             icon = "✅" if flag_type == 'success' else ("⚠️" if flag_type == 'warning' else "🚨")
-            st.markdown(
-                f'<div class="flag-{flag_type}">{icon} {msg}</div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f'<div class="flag-{flag_type}">{icon} {msg}</div>', unsafe_allow_html=True)
 
         st.divider()
 
-        # ── Trend analysis ───────────────────────────
+        # ── Trend analysis ────────────────────────────
         if trends and trends.get('trends'):
             st.markdown('<div class="section-header">Year-on-Year Trends</div>', unsafe_allow_html=True)
-
             trend_data = trends['trends']
             years      = trends['years']
-            labels     = ['Gross Margin','Net Margin','Current Ratio',
-                          'Quick Ratio','Debt to Equity','ROE','ROA']
-            keys       = ['gross_margin','net_margin','current_ratio',
-                          'quick_ratio','debt_to_equity','roe','roa']
+            labels = ['Gross Margin','Net Margin','Current Ratio','Quick Ratio','Debt to Equity','ROE','ROA']
+            keys   = ['gross_margin','net_margin','current_ratio','quick_ratio','debt_to_equity','roe','roa']
 
             cols = st.columns(4)
             for i, (label, key) in enumerate(zip(labels[:4], keys[:4])):
                 t = trend_data[key]
-                arrow = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
+                arrow     = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
                 col_delta = "normal" if t['direction'] == 'Improving' else ("inverse" if t['direction'] == 'Worsening' else "off")
                 with cols[i]:
-                    st.metric(label,
-                              f"{t['latest']}",
-                              f"{arrow} {t['change']} vs {years[0]}",
-                              delta_color=col_delta)
+                    st.metric(label, f"{t['latest']}", f"{arrow} {t['change']} vs {years[0]}", delta_color=col_delta)
 
             cols2 = st.columns(3)
             for i, (label, key) in enumerate(zip(labels[4:], keys[4:])):
                 t = trend_data[key]
-                arrow = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
+                arrow     = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
                 col_delta = "normal" if t['direction'] == 'Improving' else ("inverse" if t['direction'] == 'Worsening' else "off")
                 with cols2[i]:
-                    st.metric(label,
-                              f"{t['latest']}",
-                              f"{arrow} {t['change']} vs {years[0]}",
-                              delta_color=col_delta)
+                    st.metric(label, f"{t['latest']}", f"{arrow} {t['change']} vs {years[0]}", delta_color=col_delta)
 
             st.divider()
 
-        # ── AI CFO Narrative ─────────────────────────
+        # ── AI CFO Narrative ──────────────────────────
         st.markdown('<div class="section-header">🤖 AI CFO Narrative</div>', unsafe_allow_html=True)
         if analysis and analysis.get('narrative'):
-            clean = clean_text(analysis['narrative'])
-            st.markdown(f'<div style="background:#EEEDFE;border-left:4px solid #534AB7;padding:1rem 1.25rem;border-radius:8px;line-height:1.8;color:#1A1916;">{clean}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="background:#EEEDFE;border-left:4px solid #534AB7;padding:1rem 1.25rem;'
+                f'border-radius:8px;line-height:1.8;color:#1A1916;">{clean_text(analysis["narrative"])}</div>',
+                unsafe_allow_html=True)
 
         st.divider()
 
         # ── Benchmark commentary ──────────────────────
         if benchmark and benchmark.get('commentary'):
             st.markdown('<div class="section-header">📊 Benchmark Commentary</div>', unsafe_allow_html=True)
-            st.markdown(f'<div style="background:#EAF3DE;border-left:4px solid #1D9E75;padding:1rem 1.25rem;border-radius:8px;line-height:1.8;color:#1A1916;">{clean_text(benchmark["commentary"])}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="background:#EAF3DE;border-left:4px solid #1D9E75;padding:1rem 1.25rem;'
+                f'border-radius:8px;line-height:1.8;color:#1A1916;">{clean_text(benchmark["commentary"])}</div>',
+                unsafe_allow_html=True)
             st.divider()
 
-                # ── Scenario Modelling ───────────────────────
+        # ── Scenario Modelling ────────────────────────
         st.divider()
         st.markdown('<div class="section-header">🔮 What-If Scenario Modelling</div>', unsafe_allow_html=True)
         st.markdown("Adjust the sliders to model how changes would affect the health score and key ratios.")
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            revenue_change = st.slider(
-                "Revenue change %",
-                min_value=-30, max_value=50, value=0, step=5,
-                help="How would a revenue increase or decrease affect your ratios?"
-            )
+            revenue_change = st.slider("Revenue change %",    min_value=-30, max_value=50,     value=0, step=5)
         with col2:
-            cost_change = st.slider(
-                "Cost reduction %",
-                min_value=-20, max_value=30, value=0, step=5,
-                help="How would reducing operating costs affect profitability?"
-            )
+            cost_change    = st.slider("Cost reduction %",    min_value=-20, max_value=30,     value=0, step=5)
         with col3:
-            debt_repay = st.slider(
-                "Debt repayment (NZD)",
-                min_value=0, max_value=200000, value=0, step=10000,
-                help="How would paying down debt affect your leverage ratios?"
-            )
+            debt_repay     = st.slider("Debt repayment (NZD)",min_value=0,   max_value=200000, value=0, step=10000)
 
         if revenue_change != 0 or cost_change != 0 or debt_repay != 0:
-            orig_revenue  = float(ratios['revenue'])
-            orig_profit   = float(ratios['net_profit'])
-            orig_debt     = float(ratios['total_debt'])
-            orig_equity   = float(ratios['total_equity'])
-            orig_assets   = float(ratios['total_assets'])
+            orig_revenue = float(ratios['revenue'])
+            orig_profit  = float(ratios['net_profit'])
+            orig_debt    = float(ratios['total_debt'])
+            orig_equity  = float(ratios['total_equity'])
+            orig_assets  = float(ratios['total_assets'])
 
-            new_revenue = orig_revenue * (1 + revenue_change/100)
-            new_profit  = orig_profit + (new_revenue - orig_revenue) * 0.4 - (orig_revenue * cost_change/100 * 0.3)
-            new_debt    = max(0, orig_debt - debt_repay)
-            new_equity  = orig_equity + debt_repay
-
-            new_gross_margin  = round((new_revenue - float(ratios['revenue']) * float(ratios['gross_margin'])/100 * (1 - cost_change/100)) / new_revenue * 100, 2) if new_revenue > 0 else 0
-            new_net_margin    = round(new_profit / new_revenue * 100, 2) if new_revenue > 0 else 0
-            new_debt_equity   = round(new_debt / new_equity, 2) if new_equity > 0 else 0
-            new_roe           = round(new_profit / new_equity * 100, 2) if new_equity > 0 else 0
-            new_roa           = round(new_profit / orig_assets * 100, 2) if orig_assets > 0 else 0
+            new_revenue      = orig_revenue * (1 + revenue_change/100)
+            new_profit       = orig_profit + (new_revenue - orig_revenue)*0.4 - (orig_revenue*cost_change/100*0.3)
+            new_debt         = max(0, orig_debt - debt_repay)
+            new_equity       = orig_equity + debt_repay
+            new_gross_margin = round((new_revenue - orig_revenue*(float(ratios['gross_margin'])/100)*(1 - cost_change/100))/new_revenue*100, 2) if new_revenue > 0 else 0
+            new_net_margin   = round(new_profit/new_revenue*100, 2) if new_revenue > 0 else 0
+            new_debt_equity  = round(new_debt/new_equity, 2) if new_equity > 0 else 0
+            new_roe          = round(new_profit/new_equity*100, 2) if new_equity > 0 else 0
+            new_roa          = round(new_profit/orig_assets*100, 2) if orig_assets > 0 else 0
 
             from modules.narrative_generator import calculate_health_score
             scenario_ratios = ratios.copy()
@@ -623,89 +596,42 @@ elif page == "📊 Analyse a Business":
 
             st.markdown("#### Scenario Results")
             c1, c2, c3, c4, c5 = st.columns(5)
-
-            with c1:
-                st.metric("Health Score",
-                          f"{new_score}/100",
-                          f"{new_score - score:+d} vs current",
-                          delta_color="normal" if new_score >= score else "inverse")
-            with c2:
-                st.metric("Net Margin",
-                          f"{new_net_margin}%",
-                          f"{round(new_net_margin - float(ratios['net_margin']), 2):+.2f}%",
-                          delta_color="normal" if new_net_margin >= float(ratios['net_margin']) else "inverse")
-            with c3:
-                st.metric("Revenue",
-                          f"NZD {new_revenue:,.0f}",
-                          f"{revenue_change:+d}%",
-                          delta_color="normal" if revenue_change >= 0 else "inverse")
-            with c4:
-                st.metric("Debt to Equity",
-                          f"{new_debt_equity}x",
-                          f"{round(new_debt_equity - float(ratios['debt_to_equity']), 2):+.2f}x",
-                          delta_color="inverse" if new_debt_equity > float(ratios['debt_to_equity']) else "normal")
-            with c5:
-                st.metric("ROE",
-                          f"{new_roe}%",
-                          f"{round(new_roe - float(ratios['roe']), 2):+.2f}%",
-                          delta_color="normal" if new_roe >= float(ratios['roe']) else "inverse")
+            with c1: st.metric("Health Score",   f"{new_score}/100",          f"{new_score-score:+d} vs current",                                    delta_color="normal" if new_score >= score else "inverse")
+            with c2: st.metric("Net Margin",     f"{new_net_margin}%",        f"{round(new_net_margin-float(ratios['net_margin']),2):+.2f}%",         delta_color="normal" if new_net_margin >= float(ratios['net_margin']) else "inverse")
+            with c3: st.metric("Revenue",        f"NZD {new_revenue:,.0f}",   f"{revenue_change:+d}%",                                               delta_color="normal" if revenue_change >= 0 else "inverse")
+            with c4: st.metric("Debt to Equity", f"{new_debt_equity}x",       f"{round(new_debt_equity-float(ratios['debt_to_equity']),2):+.2f}x",   delta_color="inverse" if new_debt_equity > float(ratios['debt_to_equity']) else "normal")
+            with c5: st.metric("ROE",            f"{new_roe}%",               f"{round(new_roe-float(ratios['roe']),2):+.2f}%",                      delta_color="normal" if new_roe >= float(ratios['roe']) else "inverse")
 
             if st.button("🤖 Get AI advice on this scenario"):
                 with st.spinner("Asking AI for scenario advice..."):
                     from modules.ai_client import ask_claude
-                    scenario_prompt = f"""You are a NZ business advisor. A business owner is modelling a financial scenario.
-
+                    advice = ask_claude(f"""You are a NZ business advisor. A business owner is modelling a financial scenario.
 Business: {ratios['business_name']} | Industry: {ratios['industry']}
-
-Current situation:
-- Health Score: {score}/100
-- Net Margin: {ratios['net_margin']}%
-- Debt to Equity: {ratios['debt_to_equity']}x
-- ROE: {ratios['roe']}%
-
-Proposed scenario:
-- Revenue change: {revenue_change:+d}%
-- Cost reduction: {cost_change:+d}%
-- Debt repayment: NZD {debt_repay:,}
-
-Projected outcome:
-- New Health Score: {new_score}/100
-- New Net Margin: {new_net_margin}%
-- New Debt to Equity: {new_debt_equity}x
-- New ROE: {new_roe}%
-
-In 2 short paragraphs:
-1. Is this a realistic and worthwhile scenario for a NZ SME?
-2. What should the business prioritise first to achieve this?
-
-Be direct and NZ-specific. Under 120 words."""
-
-                    advice = ask_claude(scenario_prompt, max_tokens=250)
+Current: Health Score {score}/100, Net Margin {ratios['net_margin']}%, D/E {ratios['debt_to_equity']}x, ROE {ratios['roe']}%
+Scenario: Revenue {revenue_change:+d}%, Cost reduction {cost_change:+d}%, Debt repayment NZD {debt_repay:,}
+Projected: Health Score {new_score}/100, Net Margin {new_net_margin}%, D/E {new_debt_equity}x, ROE {new_roe}%
+In 2 short paragraphs: (1) Is this realistic for a NZ SME? (2) What to prioritise first?
+Be direct and NZ-specific. Under 120 words.""", max_tokens=250)
                     st.markdown(
-                        f'<div style="background:#EEEDFE;border-left:4px solid #534AB7;'
-                        f'padding:1rem 1.25rem;border-radius:8px;line-height:1.8;color:#1A1916;">'
-                        f'{advice}</div>',
-                        unsafe_allow_html=True
-                    )
+                        f'<div style="background:#EEEDFE;border-left:4px solid #534AB7;padding:1rem 1.25rem;'
+                        f'border-radius:8px;line-height:1.8;color:#1A1916;">{advice}</div>',
+                        unsafe_allow_html=True)
         else:
             st.info("Move the sliders above to model different scenarios.", icon="💡")
 
         st.divider()
 
-        # ── PDF Download ─────────────────────────────
+        # ── PDF Download ──────────────────────────────
         st.markdown('<div class="section-header">📄 Download Report</div>', unsafe_allow_html=True)
         if st.button("Generate & Download PDF Report", use_container_width=True):
             with st.spinner("Generating PDF..."):
-                bid = st.session_state.get('demo_business_id', 1)
+                bid      = st.session_state.get('demo_business_id', 1)
                 pdf_path = generate_report(business_id=bid)
                 if pdf_path:
                     with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            label="⬇ Download PDF",
-                            data=f,
-                            file_name=pdf_path.split('/')[-1],
-                            mime="application/pdf"
-                        )
+                        st.download_button(label="⬇ Download PDF", data=f,
+                                           file_name=pdf_path.split('/')[-1],
+                                           mime="application/pdf")
 
 
 elif page == "📈 Benchmarks":
@@ -715,7 +641,6 @@ elif page == "📈 Benchmarks":
 
 elif page == "ℹ️ About":
     st.markdown('<div class="main-header">About This Project</div>', unsafe_allow_html=True)
-
     st.markdown("""
     ### NZ SME Financial Health Analyser
 
@@ -724,7 +649,7 @@ elif page == "ℹ️ About":
 
     **The problem:** New Zealand has over 550,000 SMEs, yet most lack access to
     affordable professional financial analysis. Banks and large corporations take
-    financial health monitoring for granted — SMEs shouldn't have to.
+    financial health monitoring for granted — SMEs should not have to.
 
     **The solution:** An AI-powered tool that delivers CFO-level financial analysis
     in seconds, completely free, benchmarked against real NZ industry data.
