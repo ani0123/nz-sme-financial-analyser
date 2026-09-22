@@ -243,7 +243,7 @@ elif page == "📊 Analyse a Business":
         with col4:
             employees = st.number_input("Number of employees", min_value=1, max_value=10000, value=10)
 
-        year = st.selectbox("Financial year", [2024, 2023, 2022], index=0)
+        year = None
 
     st.divider()
 
@@ -283,6 +283,26 @@ elif page == "📊 Analyse a Business":
         # CSV upload mode
         elif df_raw is not None:
             from modules.xero_mapper import process_upload
+            import pandas as pd
+
+            # Auto-detect latest year from uploaded data
+            if 'year' in df_raw.columns:
+                year = int(df_raw['year'].max())
+                latest_row = df_raw[df_raw['year'] == year].iloc[0]
+            else:
+                year = 2024
+                latest_row = df_raw.iloc[0]
+
+            # Auto-detect employees and age from latest year row
+            if 'num_employees' in df_raw.columns:
+                employees = int(latest_row['num_employees'])
+            if 'business_age' in df_raw.columns:
+                biz_age = int(latest_row['business_age'])
+            if 'name' in df_raw.columns and not biz_name:
+                biz_name = latest_row['name']
+            if 'industry' in df_raw.columns and latest_row['industry'] in INDUSTRIES:
+                industry = latest_row['industry']
+
             result = process_upload(
                 df_raw,
                 business_name=biz_name,
@@ -291,6 +311,7 @@ elif page == "📊 Analyse a Business":
                 num_employees=employees,
                 year=year
             )
+            st.info(f"✓ Auto-detected: Latest year = {year} | Employees = {employees} | Industry = {industry}")
             if not result['is_valid']:
                 st.error(f"Missing columns: {result['missing']}")
             else:
