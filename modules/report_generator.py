@@ -4,6 +4,9 @@
 #  combining all AI analysis outputs
 # ══════════════════════════════════════════════════════
 
+import os
+import tempfile
+
 from fpdf import FPDF, XPos, YPos
 from datetime import date
 from modules.narrative_generator import generate_cfo_narrative, calculate_health_score, get_ratios_for_business
@@ -317,7 +320,11 @@ def generate_report(business_id, year=2024, output_dir='outputs'):
 
     # ── Save PDF ─────────────────────────────────────
     safe_name = business_name.replace(' ', '_').replace('/', '-')
-    filename  = f"{output_dir}/{safe_name}_{year}_report.pdf"
+    report_name = f"{safe_name}_{year}_report.pdf"
+    filename = f"{output_dir}/{report_name}" if output_dir else report_name
+    if not os.path.dirname(filename):
+        filename = os.path.join(tempfile.gettempdir(), os.path.basename(filename))
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     pdf.output(filename)
     print(f"\n✓ PDF report saved: {filename}")
     return filename
