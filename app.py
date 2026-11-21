@@ -192,10 +192,10 @@ elif page == "📊 Analyse a Business":
 
     elif upload_method == "📥 Use Xero export":
         st.info("""
-        **How to export from Xero:**
-        1. In Xero → Reports → Profit & Loss → Export as CSV
-        2. In Xero → Reports → Balance Sheet → Export as CSV
-        3. Upload both files below — we'll map the columns automatically
+        **How to export from Xero**
+        1. Run the standard Profit and Loss and Balance Sheet reports for matching financial periods.
+        2. Export each report as a CSV, or export to Excel or Google Sheets and save each report as a CSV.
+        3. Keep the account labels, totals and period headings, then upload both files below.
         """)
         col1, col2 = st.columns(2)
         with col1:
@@ -204,11 +204,35 @@ elif page == "📊 Analyse a Business":
             bs_file = st.file_uploader("Upload Balance Sheet CSV", type=['csv'], key="bs")
 
         if pnl_file and bs_file:
+            import csv
+            from io import StringIO
+
             import pandas as pd
-            pnl_df = pd.read_csv(pnl_file)
-            bs_df  = pd.read_csv(bs_file)
-            df_raw = pd.concat([pnl_df, bs_df], axis=1)
-            st.success("✓ Both Xero files uploaded — columns will be mapped automatically")
+            from modules.xero_mapper import map_xero_exports
+
+            try:
+                # Report titles and notes can have fewer columns than the totals.
+                pnl_df = pd.DataFrame(list(csv.reader(StringIO(pnl_file.getvalue().decode("utf-8-sig")), strict=True)))
+                bs_df = pd.DataFrame(list(csv.reader(StringIO(bs_file.getvalue().decode("utf-8-sig")), strict=True)))
+                mapped = map_xero_exports(pnl_df, bs_df)
+            except (csv.Error, ValueError) as error:
+                st.error(
+                    f"Could not map the Xero reports. {error} "
+                    "Upload separate UTF-8 CSV copies of the standard Profit and Loss and Balance Sheet "
+                    "with account labels, report totals and amount columns for matching periods."
+                )
+            else:
+                if "year" not in mapped.columns:
+                    reporting_year = st.number_input(
+                        "Reporting year for these undated exports", min_value=1900, max_value=2099,
+                        value=None, step=1, key="xero_reporting_year",
+                    )
+                    if reporting_year is not None:
+                        mapped["year"] = reporting_year
+                if "year" in mapped.columns:
+                    df_raw = mapped
+                    st.success(f"✓ Both Xero reports mapped for {int(mapped['year'].iloc[0])}")
+                st.dataframe(mapped.drop(columns="current_liab").head(), width="stretch")
 
     elif upload_method == "🏢 Use demo data":
         import pandas as pd
@@ -327,6 +351,20 @@ elif page == "📊 Analyse a Business":
             if 'industry' in df_raw.columns and latest_row['industry'] in INDUSTRIES:
                 industry = str(latest_row['industry'])
 
+            if upload_method == "📥 Use Xero export":
+                biz_name = biz_name.strip()
+                if not biz_name:
+                    st.error("Enter a business name in Step 2 before analysing your Xero reports.")
+                    st.stop()
+
+                df_raw = df_raw.assign(
+                    name=biz_name,
+                    industry=industry,
+                    business_age=biz_age,
+                    num_employees=employees,
+                    year=year,
+                )
+
             result = process_upload(
                 df_raw,
                 business_name=biz_name,
@@ -419,16 +457,40 @@ elif page == "📊 Analyse a Business":
 
         # ── Health score + summary metrics ────────────
         col1, col2, col3, col4 = st.columns(4)
-        score_col = "#1D9E75" if score >= 75 else ("#BA7517" if score >= 50 else "#A32D2D")
-        score_lbl = "Healthy" if score >= 75 else ("Moderate" if score >= 50 else "At Risk")
-
         with col1:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div style="font-size:0.85rem;color:#666360;">Health Score</div>
-                <div style="font-size:2.5rem;font-weight:700;color:{score_col};">{score}</div>
-                <div style="font-size:0.9rem;font-weight:600;color:{score_col};">{score_lbl}</div>
-            </div>""", unsafe_allow_html=True)
+            score_label = "Healthy" if score >= 75 else ("Moderate" if score >= 50 else "At Risk")
+            health_gauge = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=score,
+                number=dict(valueformat=".0f", font=dict(size=32)),
+                domain=dict(x=[0, 1], y=[0.25, 1]),
+                gauge=dict(
+                    axis=dict(range=[0, 100], tickvals=[0, 50, 75, 100], tickfont=dict(size=10)),
+                    bar=dict(color="#263445", thickness=0.28),
+                    borderwidth=0,
+                    bgcolor="rgba(0,0,0,0)",
+                    steps=[
+                        dict(range=[0, 50], color="#A32D2D"),
+                        dict(range=[50, 75], color="#BA7517"),
+                        dict(range=[75, 100], color="#1D9E75"),
+                    ],
+                ),
+            ))
+            health_gauge.add_annotation(
+                text=f"<b>{score_label}</b>",
+                x=0.5, y=0.08,
+                xref="paper", yref="paper",
+                xanchor="center", yanchor="middle",
+                showarrow=False,
+                font=dict(size=14),
+            )
+            health_gauge.update_layout(
+                height=170,
+                margin=dict(l=18, r=18, t=10, b=8),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(health_gauge, width="stretch", config={"displayModeBar": False})
         with col2:
             st.metric("Annual Revenue",   f"NZD {float(ratios['revenue']):,.0f}")
         with col3:
@@ -511,30 +573,86 @@ elif page == "📊 Analyse a Business":
         st.divider()
 
         # ── Trend analysis ────────────────────────────
-        if trends and trends.get('trends'):
-            st.markdown('<div class="section-header">Year-on-Year Trends</div>', unsafe_allow_html=True)
-            trend_data = trends['trends']
-            years      = trends['years']
-            labels = ['Gross Margin','Net Margin','Current Ratio','Quick Ratio','Debt to Equity','ROE','ROA']
-            keys   = ['gross_margin','net_margin','current_ratio','quick_ratio','debt_to_equity','roe','roa']
+        st.markdown('<div class="section-header">Year-on-Year Trends</div>', unsafe_allow_html=True)
+        ratio_specs = [
+            ("gross_margin", "Gross Margin", "#185FA5", "%"),
+            ("net_margin", "Net Margin", "#1D9E75", "%"),
+            ("current_ratio", "Current Ratio", "#534AB7", "x"),
+            ("quick_ratio", "Quick Ratio", "#BA7517", "x"),
+            ("debt_to_equity", "Debt to Equity", "#A32D2D", "x"),
+            ("roe", "ROE", "#2E8B57", "%"),
+            ("roa", "ROA", "#D4860B", "%"),
+        ]
+        trend_data = trends.get("trends") if trends else None
+        years = trends["years"] if trends else []
+        has_yearly_change = bool(trend_data) and len(years) >= 2
 
-            cols = st.columns(4)
-            for i, (label, key) in enumerate(zip(labels[:4], keys[:4])):
-                t = trend_data[key]
-                arrow     = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
-                col_delta = "normal" if t['direction'] == 'Improving' else ("inverse" if t['direction'] == 'Worsening' else "off")
-                with cols[i]:
-                    st.metric(label, f"{t['latest']}", f"{arrow} {t['change']} vs {years[0]}", delta_color=col_delta)
+        if has_yearly_change:
+            older_years = years[:-2]
+            history = {}
+            if older_years:
+                # The saved trend summary only contains the latest two years.
+                from sqlalchemy.exc import SQLAlchemyError
+                from modules.trend_analyser import get_multi_year_ratios
 
-            cols2 = st.columns(3)
-            for i, (label, key) in enumerate(zip(labels[4:], keys[4:])):
-                t = trend_data[key]
-                arrow     = "↑" if t['direction'] == 'Improving' else ("↓" if t['direction'] == 'Worsening' else "→")
-                col_delta = "normal" if t['direction'] == 'Improving' else ("inverse" if t['direction'] == 'Worsening' else "off")
-                with cols2[i]:
-                    st.metric(label, f"{t['latest']}", f"{arrow} {t['change']} vs {years[0]}", delta_color=col_delta)
+                if "chart_history" not in trends:
+                    try:
+                        historical_ratios = get_multi_year_ratios(int(ratios["business_id"]))
+                    except (SQLAlchemyError, KeyError, ValueError):
+                        st.warning("Earlier ratio values could not be loaded. The latest two years are shown.")
+                    else:
+                        ratio_keys = [key for key, _, _, _ in ratio_specs]
+                        historical_ratios = historical_ratios.set_index("year").reindex(older_years)[ratio_keys]
+                        trends["chart_history"] = (
+                            historical_ratios.astype(object)
+                            .where(historical_ratios.notna(), None)
+                            .to_dict("list")
+                        )
+                history = trends.get("chart_history", {})
 
-            st.divider()
+            trends_chart = go.Figure()
+            for key, label, color, unit in ratio_specs:
+                ratio_trend = trend_data[key]
+                values = history.get(key, [None] * len(older_years))
+                trends_chart.add_trace(go.Scatter(
+                    x=years,
+                    y=[*values, ratio_trend["previous"], ratio_trend["latest"]],
+                    name=label,
+                    mode="lines+markers",
+                    line=dict(color=color),
+                    yaxis="y" if unit == "%" else "y2",
+                    hovertemplate=f"{label}: %{{y:.2f}}{unit}<extra></extra>",
+                ))
+            trends_chart.update_layout(
+                height=300,
+                showlegend=True,
+                legend=dict(orientation="h", x=0, y=-0.16, yanchor="top"),
+                hovermode="x unified",
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(tickmode="array", tickvals=years, showgrid=False, zeroline=False),
+                yaxis=dict(ticksuffix="%", showgrid=False, zeroline=False),
+                yaxis2=dict(ticksuffix="x", overlaying="y", side="right", showgrid=False, zeroline=False),
+            )
+            st.plotly_chart(trends_chart, width="stretch")
+            st.caption("Year-on-year ratio trends — hover to see values")
+
+        trend_directions = {"Improving": ("↑", "normal"), "Worsening": ("↓", "inverse")}
+        for group in (ratio_specs[:4], ratio_specs[4:]):
+            for column, (key, label, _, _) in zip(st.columns(len(group)), group):
+                if has_yearly_change:
+                    ratio_trend = trend_data[key]
+                    arrow, delta_color = trend_directions.get(ratio_trend["direction"], ("→", "off"))
+                    column.metric(
+                        label, f"{ratio_trend['latest']}",
+                        f"{arrow} {ratio_trend['change']} vs {years[-2]}",
+                        delta_color=delta_color,
+                    )
+                else:
+                    column.metric(label, f"{ratios[key]}")
+
+        st.divider()
 
         # ── AI CFO Narrative ──────────────────────────
         st.markdown('<div class="section-header">🤖 AI CFO Narrative</div>', unsafe_allow_html=True)
@@ -633,10 +751,217 @@ Be direct and NZ-specific. Under 120 words.""", max_tokens=250)
                                            file_name=pdf_path.split('/')[-1],
                                            mime="application/pdf")
 
+        # ── Business comparison ──────────────────────
+        from html import escape
+
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from modules.db_connection import get_engine
+        from modules.narrative_generator import calculate_health_score, get_ratios_for_business
+        from modules.trend_analyser import get_multi_year_ratios
+
+        st.divider()
+        st.markdown(
+            '<div class="section-header">📊 Compare with another business</div>',
+            unsafe_allow_html=True,
+        )
+
+        current_business_id = int(ratios["business_id"])
+        comparison_source = (current_business_id, int(ratios["year"]))
+        comparison_metrics = [
+            ("gross_margin", "Gross Margin", "%"),
+            ("net_margin", "Net Margin", "%"),
+            ("current_ratio", "Current Ratio", "x"),
+            ("quick_ratio", "Quick Ratio", "x"),
+            ("debt_to_equity", "Debt to Equity", "x"),
+            ("roe", "ROE", "%"),
+            ("roa", "ROA", "%"),
+        ]
+
+        try:
+            businesses = pd.read_sql("SELECT id, name, industry FROM businesses ORDER BY name", get_engine())
+        except (SQLAlchemyError, ValueError):
+            st.error("The business list could not be loaded. Please try again later.")
+        else:
+            other_businesses = businesses[businesses["id"] != current_business_id]
+            if other_businesses.empty:
+                st.info("There are no other businesses available to compare.")
+            else:
+                business_labels = {}
+                for business in other_businesses.itertuples(index=False):
+                    industry = business.industry if pd.notna(business.industry) else "Unknown industry"
+                    business_labels[business.id] = f"{business.name} ({industry}, ID {business.id})"
+                comparison_id = st.selectbox(
+                    "Business to compare",
+                    options=list(business_labels),
+                    format_func=business_labels.__getitem__,
+                    index=None,
+                    placeholder="Select another business",
+                    key=f"comparison_business_{current_business_id}",
+                )
+                if st.button("Compare", key="compare_business", disabled=comparison_id is None):
+                    st.session_state.pop("comparison", None)
+                    try:
+                        selected_ratios = get_ratios_for_business(int(comparison_id))
+                        if selected_ratios is None:
+                            available_ratios = get_multi_year_ratios(int(comparison_id))
+                            if not available_ratios.empty:
+                                selected_ratios = available_ratios.iloc[-1]
+                    except (SQLAlchemyError, ValueError):
+                        st.error("The selected business's ratios could not be loaded. Please try again later.")
+                    else:
+                        if selected_ratios is None:
+                            st.info("Financial ratios are unavailable for the selected business.")
+                        else:
+                            score_keys = [key for key, _, _ in comparison_metrics if key != "quick_ratio"]
+                            selected_score = None
+                            if selected_ratios[score_keys].notna().all():
+                                selected_score = calculate_health_score(selected_ratios)
+                            st.session_state["comparison"] = {
+                                "source": comparison_source,
+                                "ratios": selected_ratios,
+                                "score": selected_score,
+                            }
+
+        comparison = st.session_state.get("comparison")
+        if comparison and comparison["source"] == comparison_source:
+            selected_ratios = comparison["ratios"]
+            table_headers = []
+            for business, role in ((ratios, "Current business"), (selected_ratios, "Selected business")):
+                name = escape(str(business["business_name"]))
+                year = int(business["year"])
+                table_headers.append(
+                    f'<th scope="col"><div class="metric-card" style="color:#403E3A;">'
+                    f'<strong style="color:#185FA5;">{name}</strong><br>'
+                    f'{role} · {year}</div></th>'
+                )
+
+            table_rows = []
+            for key, label, unit in comparison_metrics:
+                current_value = ratios[key]
+                selected_value = selected_ratios[key]
+                current_text = f"{current_value:.2f}{unit}" if pd.notna(current_value) else "Unavailable"
+                selected_text = f"{selected_value:.2f}{unit}" if pd.notna(selected_value) else "Unavailable"
+                if pd.notna(current_value) and pd.notna(selected_value) and current_value != selected_value:
+                    current_is_better = (
+                        current_value < selected_value if key == "debt_to_equity" else current_value > selected_value
+                    )
+                    if current_is_better:
+                        current_text += " ✅"
+                    else:
+                        selected_text += " ✅"
+                table_rows.append(f'<tr><th scope="row">{label}</th><td>{current_text}</td><td>{selected_text}</td></tr>')
+
+            selected_score = comparison["score"]
+            selected_score_text = f"{selected_score}/100" if selected_score is not None else "Unavailable"
+            table_rows.append(
+                f'<tr><th scope="row">Health Score</th><td>{score}/100</td><td>{selected_score_text}</td></tr>'
+            )
+            st.html(
+                '<table aria-label="Financial comparison" style="width:100%;">'
+                f'<thead><tr><th scope="col">Metric</th>{"".join(table_headers)}</tr></thead>'
+                f'<tbody>{"".join(table_rows)}</tbody></table>'
+            )
+
 
 elif page == "📈 Benchmarks":
     st.markdown('<div class="main-header">NZ Industry Benchmarks</div>', unsafe_allow_html=True)
-    st.info("🚧 This section is being built — come back soon!", icon="🔨")
+    from html import escape
+
+    import pandas as pd
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from modules.benchmarker import get_industry_benchmark
+
+    selected_industry = st.selectbox("Industry", INDUSTRIES, key="benchmark_industry")
+    ratio_definitions = [
+        ("Gross Margin", "avg_gross_margin", "%",
+         "Share of sales left after paying the direct cost of goods or services."),
+        ("Net Margin", "avg_net_margin", "%",
+         "Share of sales left as profit after all expenses and taxes."),
+        ("Current Ratio", "avg_current_ratio", "x",
+         "Dollars of short-term assets for every dollar owed in the short term."),
+        ("Quick Ratio", "avg_quick_ratio", "x",
+         "Dollars of short-term assets excluding inventory for every dollar owed in the short term."),
+        ("Debt to Equity", "avg_debt_to_eq", "x",
+         "Dollars of debt for every dollar of owners' equity."),
+        ("Return on Equity (ROE)", "avg_roe", "%",
+         "Net profit as a percentage of the owners' equity in the business."),
+        ("Return on Assets (ROA)", "avg_roa", "%",
+         "Net profit as a percentage of the value of everything the business owns."),
+    ]
+
+    try:
+        industry_benchmark = get_industry_benchmark(selected_industry)
+    except (SQLAlchemyError, ValueError):
+        industry_benchmark = None
+        st.error("Industry benchmarks could not be loaded. Please try again later.")
+    else:
+        if industry_benchmark is None:
+            st.info(f"No NZ industry benchmark is available for {selected_industry}.")
+
+    if industry_benchmark is not None:
+        benchmark_source = industry_benchmark.get("data_source")
+        benchmark_year = industry_benchmark.get("year_reference")
+        source_details = []
+        if pd.notna(benchmark_source):
+            source_details.append(str(benchmark_source))
+        if pd.notna(benchmark_year):
+            source_details.append(f"Reference year {benchmark_year:.0f}")
+        if source_details:
+            source_text = escape(" | ".join(source_details))
+            st.markdown(
+                f'<div class="metric-card" style="color:#403E3A;margin-bottom:1rem;">'
+                f'<strong style="color:#185FA5;">Benchmark source</strong><br>{source_text}</div>',
+                unsafe_allow_html=True,
+            )
+
+    benchmark_rows = []
+    for label, column, unit, description in ratio_definitions:
+        raw_value = industry_benchmark.get(column) if industry_benchmark is not None else None
+        value = float(raw_value) if pd.notna(raw_value) else None
+        benchmark_rows.append({
+            "Ratio": label,
+            "NZ Industry Average": f"{value:.2f}{unit}" if value is not None else "Unavailable",
+            "What it means": description,
+            "value": value,
+            "unit": unit,
+        })
+
+    st.markdown('<div class="section-header">Benchmark values and definitions</div>', unsafe_allow_html=True)
+    benchmark_table = pd.DataFrame(benchmark_rows).set_index("Ratio")
+    st.table(benchmark_table[["NZ Industry Average", "What it means"]])
+
+    chart_data = benchmark_table.dropna(subset=["value"])
+    if not chart_data.empty:
+        st.markdown('<div class="section-header">Benchmark chart</div>', unsafe_allow_html=True)
+        unit_groups = chart_data.groupby("unit")
+        fig = make_subplots(rows=unit_groups.ngroups, cols=1, vertical_spacing=0.18)
+        for row, (unit, unit_data) in enumerate(unit_groups, start=1):
+            fig.add_trace(
+                go.Bar(
+                    x=unit_data["value"],
+                    y=unit_data.index.tolist(),
+                    text=unit_data["NZ Industry Average"],
+                    textposition="auto",
+                    orientation="h",
+                    marker_color="#185FA5",
+                    hovertemplate="%{y}: %{text}<extra></extra>",
+                ),
+                row=row, col=1,
+            )
+            fig.update_xaxes(ticksuffix=unit, row=row, col=1)
+            fig.update_yaxes(autorange="reversed", automargin=True, row=row, col=1)
+        fig.update_layout(
+            showlegend=False,
+            height=440,
+            margin=dict(l=0, r=20, t=10, b=0),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig, width="stretch")
 
 
 elif page == "ℹ️ About":
